@@ -1,3 +1,8 @@
+"""
+Database configuration and session management for Belnova Backend API.
+Connects to PostgreSQL with connection pooling, automatic schema initialization, and fast-fail timeouts.
+"""
+
 import os
 from sqlalchemy import create_engine
 from sqlalchemy.ext.declarative import declarative_base
