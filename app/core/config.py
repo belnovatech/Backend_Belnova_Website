@@ -3,8 +3,8 @@ import os
 
 load_dotenv()
 
-EMAIL = os.getenv("EMAIL", "").strip()
-SENDGRID_API_KEY = os.getenv("SENDGRID_API_KEY", "").strip()
+EMAIL = os.getenv("EMAIL", "info@belnovatech.com").strip()
+BREVO_API_KEY = os.getenv("BREVO_API_KEY", "").strip()
 import re
 import socket
 import urllib.parse

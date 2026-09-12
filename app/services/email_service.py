@@ -2,95 +2,93 @@ import base64
 import html
 import logging
 import os
-import socket
-from urllib.error import URLError
+import httpx
 
-from sendgrid import SendGridAPIClient
-from sendgrid.helpers.mail import Mail, Attachment, FileContent, FileName, FileType, Disposition, ContentId, ReplyTo
-from python_http_client.exceptions import UnauthorizedError, ForbiddenError, HTTPError
-
-from app.core.config import EMAIL, SENDGRID_API_KEY, require_env
+from app.core.config import EMAIL, BREVO_API_KEY, require_env
 
 logger = logging.getLogger(__name__)
 
+BREVO_SMTP_URL = "https://api.brevo.com/v3/smtp/email"
+
 
 def _get_sender_email() -> str:
-    sender_email = (EMAIL or os.getenv("EMAIL", "")).strip()
+    sender_email = (EMAIL or os.getenv("EMAIL", "info@belnovatech.com")).strip()
     if not sender_email:
-        sender_email = require_env("EMAIL")
+        sender_email = "info@belnovatech.com"
     return sender_email
 
 
-def _get_sendgrid_client(timeout: int = 15) -> SendGridAPIClient:
-    api_key = SENDGRID_API_KEY or os.getenv("SENDGRID_API_KEY", "").strip()
+def _get_brevo_api_key() -> str:
+    api_key = (BREVO_API_KEY or os.getenv("BREVO_API_KEY", "")).strip()
     if not api_key:
-        api_key = require_env("SENDGRID_API_KEY")
-    sg = SendGridAPIClient(api_key)
+        api_key = require_env("BREVO_API_KEY")
+    return api_key
+
+
+def _send_brevo_email(payload: dict, label: str) -> dict:
+    api_key = _get_brevo_api_key()
+    headers = {
+        "api-key": api_key,
+        "Accept": "application/json",
+        "Content-Type": "application/json",
+    }
+
     try:
-        timeout_val = int(os.getenv("SENDGRID_TIMEOUT", str(timeout)))
+        timeout_val = float(os.getenv("BREVO_TIMEOUT", "15.0"))
     except (ValueError, TypeError):
-        timeout_val = timeout
-    sg.client.timeout = timeout_val
-    return sg
+        timeout_val = 15.0
 
-
-def _send_sendgrid_mail(sg: SendGridAPIClient, message: Mail, label: str) -> dict:
     try:
-        response = sg.send(message)
-    except UnauthorizedError as exc:
-        body = getattr(exc, "body", b"")
-        body_text = body.decode("utf-8", errors="replace") if isinstance(body, (bytes, bytearray)) else str(body)
-        logger.error(
-            "SendGrid %s FAILED: 401 Unauthorized – The SENDGRID_API_KEY is invalid, expired, or revoked. "
-            "SendGrid response: %s",
-            label, body_text
-        )
-        raise RuntimeError(f"SendGrid {label} rejected with 401 Unauthorized: {body_text}") from exc
-    except ForbiddenError as exc:
-        body = getattr(exc, "body", b"")
-        body_text = body.decode("utf-8", errors="replace") if isinstance(body, (bytes, bytearray)) else str(body)
-        logger.error(
-            "SendGrid %s FAILED: 403 Forbidden – The sender email may not be verified in SendGrid (Single Sender Verification or Domain Authentication required). "
-            "SendGrid response: %s",
-            label, body_text
-        )
-        raise RuntimeError(f"SendGrid {label} rejected with 403 Forbidden: {body_text}") from exc
-    except (TimeoutError, URLError, socket.timeout) as exc:
-        logger.error("SendGrid %s connection timed out or network unreachable: %s", label, exc)
-        raise RuntimeError(f"SendGrid {label} connection timeout: {exc}") from exc
-    except HTTPError as exc:
-        body = getattr(exc, "body", b"")
-        body_text = body.decode("utf-8", errors="replace") if isinstance(body, (bytes, bytearray)) else str(body)
-        logger.error("SendGrid %s HTTP error (status=%s): %s", label, getattr(exc, "status_code", "unknown"), body_text)
-        raise RuntimeError(f"SendGrid {label} HTTP error: {body_text}") from exc
+        with httpx.Client(timeout=timeout_val) as client:
+            response = client.post(BREVO_SMTP_URL, headers=headers, json=payload)
+    except httpx.TimeoutException as exc:
+        logger.error("Brevo %s connection timed out: %s", label, exc)
+        raise RuntimeError(f"Brevo {label} connection timeout: {exc}") from exc
+    except httpx.RequestError as exc:
+        logger.error("Brevo %s network request failed: %s", label, exc)
+        raise RuntimeError(f"Brevo {label} network error: {exc}") from exc
     except Exception as exc:
-        logger.error("SendGrid %s failed unexpectedly: %s", label, exc)
+        logger.error("Brevo %s failed unexpectedly: %s", label, exc)
         raise
 
-    status_code = getattr(response, "status_code", None)
-    headers = getattr(response, "headers", {})
-    message_id = headers.get("X-Message-Id") or headers.get("x-message-id") or "N/A"
+    status_code = response.status_code
+    resp_text = response.text
 
-    if status_code is None:
-        logger.warning("SendGrid response did not include status code for %s", label)
-        return {"status_code": None, "message_id": message_id}
-    if status_code < 200 or status_code >= 300:
-        body = getattr(response, "body", b"")
-        body_text = body.decode("utf-8", errors="replace") if isinstance(body, (bytes, bytearray)) else str(body)
-        logger.error("SendGrid %s failed with status %s: %s", label, status_code, body_text[:500])
-        raise RuntimeError(f"SendGrid {label} failed with status {status_code}: {body_text[:250]}")
-    
-    logger.info("SendGrid accepted %s email [status=%s, message_id=%s]", label, status_code, message_id)
+    if status_code == 401:
+        logger.error(
+            "Brevo %s FAILED: 401 Unauthorized – The BREVO_API_KEY is invalid, expired, or revoked. "
+            "Please verify BREVO_API_KEY in Render environment settings.",
+            label
+        )
+        raise RuntimeError(f"Brevo {label} rejected with 401 Unauthorized")
+    elif status_code == 403:
+        logger.error(
+            "Brevo %s FAILED: 403 Forbidden – The sender email '%s' may not be verified in Brevo. "
+            "Brevo error: %s",
+            label, payload.get("sender", {}).get("email", "unknown"), resp_text[:300]
+        )
+        raise RuntimeError(f"Brevo {label} rejected with 403 Forbidden: {resp_text[:200]}")
+    elif status_code < 200 or status_code >= 300:
+        logger.error("Brevo %s failed with status %s: %s", label, status_code, resp_text[:500])
+        raise RuntimeError(f"Brevo {label} failed with status {status_code}: {resp_text[:250]}")
+
+    try:
+        resp_json = response.json()
+        message_id = resp_json.get("messageId") or "N/A"
+    except Exception:
+        message_id = "N/A"
+
+    logger.info("Brevo accepted %s email [status=%s, message_id=%s]", label, status_code, message_id)
     return {"status_code": status_code, "message_id": message_id}
 
 
 def send_contact_email(data):
+    """Handles standard contact inquiries from /contact endpoint."""
     try:
         sender_email = _get_sender_email()
-        sg = _get_sendgrid_client()
 
         # ==========================
-        # Admin Email
+        # 1. Admin Notification
         # ==========================
         try:
             admin_html = f"""
@@ -102,18 +100,19 @@ def send_contact_email(data):
             <p><b>Message:</b></p>
             <p>{html.escape(str(data.message))}</p>
             """
-            admin_mail = Mail(
-                from_email=sender_email,
-                to_emails=sender_email,
-                subject=f"New Website Enquiry - {data.subject}",
-                html_content=admin_html
-            )
-            _send_sendgrid_mail(sg, admin_mail, "admin contact")
+            admin_payload = {
+                "sender": {"name": "Belnova Tech", "email": sender_email},
+                "to": [{"email": sender_email, "name": "Belnova Admin"}],
+                "replyTo": {"email": data.email, "name": str(data.name)},
+                "subject": f"New Website Enquiry - {data.subject}",
+                "htmlContent": admin_html
+            }
+            _send_brevo_email(admin_payload, "admin contact")
         except Exception as exc:
             logger.error("Failed sending admin contact email: %s", exc)
 
         # ==========================
-        # Customer Auto Reply
+        # 2. Customer Auto Reply
         # ==========================
         try:
             customer_html = f"""
@@ -131,40 +130,34 @@ def send_contact_email(data):
             </body>
             </html>
             """
-            reply_mail = Mail(
-                from_email=sender_email,
-                to_emails=data.email,
-                subject="Thank You for Contacting Belnova Technologies",
-                html_content=customer_html
-            )
-            _send_sendgrid_mail(sg, reply_mail, "customer auto-reply")
+            customer_payload = {
+                "sender": {"name": "Belnova Tech", "email": sender_email},
+                "to": [{"email": data.email, "name": str(data.name)}],
+                "subject": "Thank You for Contacting Belnova Technologies",
+                "htmlContent": customer_html
+            }
+            _send_brevo_email(customer_payload, "customer auto-reply")
         except Exception as exc:
             logger.error("Failed sending customer auto-reply email: %s", exc)
+
     except Exception as exc:
-        logger.exception("Background contact email delivery failed: %s", exc)
+        logger.exception("Background contact email delivery encountered top-level error: %s", exc)
 
 
 def _send_contact_requirement_emails_impl(data: dict, file_data: bytes = None, filename: str = None, content_type: str = None):
     sender_email = _get_sender_email()
-    sg = _get_sendgrid_client()
 
-    # 1. Read and base64-encode the logo
+    # 1. Read and base64-encode the logo for inline HTML embedding
     logo_path = "app/static/belnova-logo.png"
-    logo_attachment = None
+    logo_data_uri = ""
     if os.path.exists(logo_path):
         try:
             with open(logo_path, "rb") as f:
                 logo_bytes = f.read()
             logo_base64 = base64.b64encode(logo_bytes).decode()
-            logo_attachment = Attachment(
-                FileContent(logo_base64),
-                FileName("belnova-logo.png"),
-                FileType("image/png"),
-                Disposition("inline"),
-                ContentId("belnova_logo")
-            )
+            logo_data_uri = f"data:image/png;base64,{logo_base64}"
         except Exception as e:
-            logger.warning("Could not attach inline logo: %s", e)
+            logger.warning("Could not read inline logo: %s", e)
 
     # 2. Escape fields for safe HTML rendering to prevent HTML injection
     escaped = {
@@ -179,6 +172,8 @@ def _send_contact_requirement_emails_impl(data: dict, file_data: bytes = None, f
         attachment_info = f"{html.escape(filename)} ({size_kb:.1f} KB)"
     elif filename:
         attachment_info = html.escape(filename)
+
+    logo_img_tag = f'<img src="{logo_data_uri}" alt="Belnova Tech" style="max-height: 45px; display: inline-block;">' if logo_data_uri else '<h2 style="color: #ffffff; margin: 0;">Belnova Tech</h2>'
 
     # 3. Dynamic HTML templates
     admin_html = f"""
@@ -217,10 +212,6 @@ def _send_contact_requirement_emails_impl(data: dict, file_data: bytes = None, f
           padding: 30px;
           text-align: center;
           border-bottom: 3px solid #6366f1;
-        }}
-        .header img {{
-          max-height: 45px;
-          display: inline-block;
         }}
         .content {{
           padding: 40px 30px;
@@ -298,7 +289,7 @@ def _send_contact_requirement_emails_impl(data: dict, file_data: bytes = None, f
       <div class="wrapper">
         <div class="container">
           <div class="header">
-            <img src="cid:belnova_logo" alt="Belnova Tech">
+            {logo_img_tag}
           </div>
           <div class="content">
             <h2 class="title">New Website Requirement</h2>
@@ -414,10 +405,6 @@ def _send_contact_requirement_emails_impl(data: dict, file_data: bytes = None, f
           text-align: center;
           border-bottom: 3px solid #6366f1;
         }}
-        .header img {{
-          max-height: 45px;
-          display: inline-block;
-        }}
         .content {{
           padding: 40px 30px;
         }}
@@ -497,7 +484,7 @@ def _send_contact_requirement_emails_impl(data: dict, file_data: bytes = None, f
       <div class="wrapper">
         <div class="container">
           <div class="header">
-            <img src="cid:belnova_logo" alt="Belnova Tech">
+            {logo_img_tag}
           </div>
           <div class="content">
             <h2 class="greeting">Hello {escaped['full_name']},</h2>
@@ -544,50 +531,43 @@ def _send_contact_requirement_emails_impl(data: dict, file_data: bytes = None, f
 
     # 4. Prepare and send Admin Notification Email (isolated in its own block)
     try:
-        admin_mail = Mail(
-            from_email=sender_email,
-            to_emails="info@belnovatech.com",
-            subject=f"New Website Requirement – {data['project_title']}",
-            html_content=admin_html
-        )
-        # Set reply-to customer email
-        admin_mail.reply_to = ReplyTo(data['work_email'])
-
-        # Add inline logo
-        if logo_attachment:
-            admin_mail.add_attachment(logo_attachment)
+        admin_payload = {
+            "sender": {"name": "Belnova Tech", "email": sender_email},
+            "to": [{"email": "info@belnovatech.com", "name": "Belnova Admin"}],
+            "replyTo": {"email": data['work_email'], "name": data.get('full_name', 'Customer')},
+            "subject": f"New Website Requirement – {data['project_title']}",
+            "htmlContent": admin_html
+        }
 
         # Add optional user file attachment to admin email (safely handle size limits)
         if file_data and filename:
-            # Check attachment size: SendGrid total message payload limit is typically 20-30MB
             if len(file_data) <= 12 * 1024 * 1024:
                 file_base64 = base64.b64encode(file_data).decode()
-                user_attachment = Attachment(
-                    FileContent(file_base64),
-                    FileName(filename),
-                    FileType(content_type or "application/octet-stream"),
-                    Disposition("attachment")
-                )
-                admin_mail.add_attachment(user_attachment)
+                admin_payload["attachment"] = [
+                    {
+                        "name": filename,
+                        "content": file_base64
+                    }
+                ]
             else:
-                logger.warning("Attachment %s exceeds 12MB limit for email payload (%d bytes); omitted from email.", filename, len(file_data))
+                logger.warning(
+                    "Attachment %s exceeds 12MB limit for email payload (%d bytes); omitted from email.",
+                    filename, len(file_data)
+                )
 
-        _send_sendgrid_mail(sg, admin_mail, "admin requirement notification")
+        _send_brevo_email(admin_payload, "admin requirement notification")
     except Exception as exc:
         logger.error("Failed to send admin requirement notification email: %s", exc)
 
     # 5. Prepare and send Customer Auto-Reply Email (isolated in its own block)
     try:
-        customer_mail = Mail(
-            from_email=sender_email,
-            to_emails=data['work_email'],
-            subject="We've Received Your Requirement – Belnova Tech",
-            html_content=customer_html
-        )
-        if logo_attachment:
-            customer_mail.add_attachment(logo_attachment)
-
-        _send_sendgrid_mail(sg, customer_mail, "customer requirement auto-reply")
+        customer_payload = {
+            "sender": {"name": "Belnova Tech", "email": sender_email},
+            "to": [{"email": data['work_email'], "name": data.get('full_name', 'Customer')}],
+            "subject": "We've Received Your Requirement – Belnova Tech",
+            "htmlContent": customer_html
+        }
+        _send_brevo_email(customer_payload, "customer requirement auto-reply")
     except Exception as exc:
         logger.error("Failed to send customer requirement auto-reply email: %s", exc)
 
@@ -602,4 +582,3 @@ def send_contact_requirement_emails(data: dict, file_data: bytes = None, filenam
         )
     except Exception as exc:
         logger.exception("Background requirement email delivery encountered top-level error: %s", exc)
-
