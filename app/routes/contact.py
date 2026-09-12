@@ -122,7 +122,7 @@ async def contact_requirement(
         logger.exception("Database error while saving contact submission: %s", e)
         raise HTTPException(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-            detail=f"Database error while saving requirement: {type(e).__name__} - {str(e)}"
+            detail="Database error while saving requirement. Please try again later."
         )
 
     # 4. Dispatch email notifications asynchronously in the background
