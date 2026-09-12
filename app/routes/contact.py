@@ -1,6 +1,6 @@
 import logging
 
-from fastapi import APIRouter, Form, File, UploadFile, Depends, HTTPException, status
+from fastapi import APIRouter, Form, File, UploadFile, Depends, HTTPException, status, BackgroundTasks
 from sqlalchemy.orm import Session
 from email_validator import validate_email, EmailNotValidError
 
@@ -14,16 +14,8 @@ logger = logging.getLogger(__name__)
 router = APIRouter()
 
 @router.post("/contact")
-def contact(data: ContactRequest):
-    try:
-        send_contact_email(data)
-    except Exception:
-        logger.exception("Fallback contact email send failed")
-        raise HTTPException(
-            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-            detail="Contact email notification could not be sent."
-        )
-
+def contact(data: ContactRequest, background_tasks: BackgroundTasks):
+    background_tasks.add_task(send_contact_email, data)
     return {
         "success": True,
         "message": "Mail Sent Successfully"
@@ -45,6 +37,7 @@ async def contact_requirement(
     budget: str = Form(None),
     source: str = Form(None),
     attachment: UploadFile = File(None),
+    background_tasks: BackgroundTasks = None,
     db: Session = Depends(get_db)
 ):
     # 1. Validation
@@ -88,7 +81,7 @@ async def contact_requirement(
             detail="You must agree to the Privacy Policy and Terms & Conditions."
         )
 
-    # 2. Process optional file attachment
+    # 2. Process optional file attachment safely into memory before response cycle ends
     attachment_filename = None
     attachment_content_type = None
     attachment_size = None
@@ -122,34 +115,39 @@ async def contact_requirement(
 
     try:
         db.add(db_submission)
-        db.flush()
-        send_contact_requirement_emails(
-            data={
-                "full_name": db_submission.full_name,
-                "company_name": db_submission.company_name,
-                "work_email": db_submission.work_email,
-                "phone_number": db_submission.phone_number,
-                "country": db_submission.country,
-                "looking_for": db_submission.looking_for,
-                "project_title": db_submission.project_title,
-                "requirement_description": db_submission.requirement_description,
-                "technology_preferences": db_submission.technology_preferences,
-                "expected_timeline": db_submission.expected_timeline,
-                "budget_range": db_submission.budget_range,
-                "how_did_you_hear": db_submission.how_did_you_hear,
-            },
-            file_data=attachment_data,
-            filename=attachment_filename,
-            content_type=attachment_content_type
-        )
         db.commit()
         db.refresh(db_submission)
     except Exception:
         db.rollback()
-        logger.exception("Contact requirement email workflow failed; database transaction rolled back")
+        logger.exception("Database error while saving contact submission")
         raise HTTPException(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-            detail="Requirement submitted, but email delivery failed. Please try again later."
+            detail="Database error while saving requirement. Please try again later."
+        )
+
+    # 4. Dispatch email notifications asynchronously in the background
+    email_payload = {
+        "full_name": db_submission.full_name,
+        "company_name": db_submission.company_name,
+        "work_email": db_submission.work_email,
+        "phone_number": db_submission.phone_number,
+        "country": db_submission.country,
+        "looking_for": db_submission.looking_for,
+        "project_title": db_submission.project_title,
+        "requirement_description": db_submission.requirement_description,
+        "technology_preferences": db_submission.technology_preferences,
+        "expected_timeline": db_submission.expected_timeline,
+        "budget_range": db_submission.budget_range,
+        "how_did_you_hear": db_submission.how_did_you_hear,
+    }
+
+    if background_tasks is not None:
+        background_tasks.add_task(
+            send_contact_requirement_emails,
+            data=email_payload,
+            file_data=attachment_data,
+            filename=attachment_filename,
+            content_type=attachment_content_type
         )
 
     # 5. Return success response matching the required template format
