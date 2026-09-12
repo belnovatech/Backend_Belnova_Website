@@ -360,61 +360,88 @@ def _send_contact_requirement_emails_impl(data: dict, file_data: bytes = None, f
 </body>
 </html>"""
 
-    # 4. Prepare and send Admin Notification Email (isolated in its own block)
-    try:
-        logger.info("[EMAIL] Sending admin notification to info@belnovatech.com")
-        admin_payload = {
-            "sender": {"name": "Belnova Tech", "email": sender_email},
-            "to": [{"email": "info@belnovatech.com", "name": "Belnova Admin"}],
-            "replyTo": {"email": data['work_email'], "name": data.get('full_name', 'Customer')},
-            "subject": f"New Website Requirement – {data['project_title']}",
-            "htmlContent": admin_html
-        }
+    import time
+    import concurrent.futures
 
-        # Add optional user file attachment to admin email (safely handle size limits)
-        if file_data and filename:
-            if len(file_data) <= 12 * 1024 * 1024:
-                file_base64 = base64.b64encode(file_data).decode()
-                admin_payload["attachment"] = [
-                    {
-                        "name": filename,
-                        "content": file_base64
-                    }
-                ]
-            else:
-                logger.warning(
-                    "Attachment %s exceeds 12MB limit for email payload (%d bytes); omitted from email.",
-                    filename, len(file_data)
-                )
+    t_task_start = time.perf_counter()
+    logger.info(
+        "[EMAIL] task_started (submission_title=%s, customer_email=%s)",
+        data.get("project_title"), data.get("work_email")
+    )
 
-        res_admin = _send_brevo_email(admin_payload, "admin requirement notification")
-        logger.info(
-            "[EMAIL] Admin Brevo response status: %s (message_id=%s)",
-            res_admin.get("status_code"), res_admin.get("message_id")
-        )
-    except Exception as exc:
-        logger.error("[EMAIL] Admin Brevo email FAILED: %s", exc)
+    # 4. Prepare Admin Notification Payload
+    admin_payload = {
+        "sender": {"name": "Belnova Tech", "email": sender_email},
+        "to": [{"email": "info@belnovatech.com", "name": "Belnova Admin"}],
+        "replyTo": {"email": data['work_email'], "name": data.get('full_name', 'Customer')},
+        "subject": f"New Website Requirement – {data['project_title']}",
+        "htmlContent": admin_html
+    }
 
-    # 5. Prepare and send Customer Auto-Reply Email (isolated in its own block)
-    try:
-        customer_email = data['work_email'].strip()
-        logger.info("[EMAIL] Sending customer auto-reply to %s", customer_email)
-        customer_payload = {
-            "sender": {"name": "Belnova Tech", "email": sender_email},
-            "to": [{"email": customer_email, "name": data.get('full_name', 'Customer')}],
-            "subject": "We've Received Your Requirement – Belnova Tech",
-            "htmlContent": customer_html
-        }
-        res_cust = _send_brevo_email(customer_payload, "customer requirement auto-reply")
-        logger.info("[EMAIL] Customer recipient: %s", customer_email)
-        logger.info(
-            "[EMAIL] Customer Brevo response status: %s (message_id=%s)",
-            res_cust.get("status_code"), res_cust.get("message_id")
-        )
-    except Exception as exc:
-        logger.error("[EMAIL] Customer Brevo auto-reply FAILED for %s: %s", data.get('work_email'), exc)
+    if file_data and filename:
+        if len(file_data) <= 12 * 1024 * 1024:
+            file_base64 = base64.b64encode(file_data).decode()
+            admin_payload["attachment"] = [
+                {
+                    "name": filename,
+                    "content": file_base64
+                }
+            ]
+        else:
+            logger.warning(
+                "Attachment %s exceeds 12MB limit for email payload (%d bytes); omitted from email.",
+                filename, len(file_data)
+            )
 
-    logger.info("[EMAIL] Background email task COMPLETE")
+    # 5. Prepare Customer Auto-Reply Payload (lightweight, zero large attachments)
+    customer_email = data['work_email'].strip()
+    customer_payload = {
+        "sender": {"name": "Belnova Tech", "email": sender_email},
+        "to": [{"email": customer_email, "name": data.get('full_name', 'Customer')}],
+        "subject": "We've Received Your Requirement – Belnova Tech",
+        "htmlContent": customer_html
+    }
+
+    # 6. Execute both email dispatches concurrently so neither blocks the other
+    def _dispatch_admin():
+        t0 = time.perf_counter()
+        logger.info("[EMAIL] admin_send_started")
+        try:
+            res_admin = _send_brevo_email(admin_payload, "admin requirement notification")
+            dur_ms = int((time.perf_counter() - t0) * 1000)
+            logger.info(
+                "[EMAIL] admin_brevo_response (status=%s, message_id=%s, elapsed_ms=%d)",
+                res_admin.get("status_code"), res_admin.get("message_id"), dur_ms
+            )
+            return res_admin
+        except Exception as exc:
+            dur_ms = int((time.perf_counter() - t0) * 1000)
+            logger.error("[EMAIL] admin_brevo_response FAILED (elapsed_ms=%d): %s", dur_ms, exc)
+            return None
+
+    def _dispatch_customer():
+        t0 = time.perf_counter()
+        logger.info("[EMAIL] customer_send_started (recipient=%s)", customer_email)
+        try:
+            res_cust = _send_brevo_email(customer_payload, "customer requirement auto-reply")
+            dur_ms = int((time.perf_counter() - t0) * 1000)
+            logger.info(
+                "[EMAIL] customer_brevo_response (status=%s, message_id=%s, elapsed_ms=%d)",
+                res_cust.get("status_code"), res_cust.get("message_id"), dur_ms
+            )
+            return res_cust
+        except Exception as exc:
+            dur_ms = int((time.perf_counter() - t0) * 1000)
+            logger.error("[EMAIL] customer_brevo_response FAILED (elapsed_ms=%d): %s", dur_ms, exc)
+            return None
+
+    with concurrent.futures.ThreadPoolExecutor(max_workers=2) as executor:
+        fut_cust = executor.submit(_dispatch_customer)
+        fut_admin = executor.submit(_dispatch_admin)
+        concurrent.futures.wait([fut_cust, fut_admin])
+
+    t_task_total_ms = int((time.perf_counter() - t_task_start) * 1000)
+    logger.info("[EMAIL] task_completed (total_email_ms=%d)", t_task_total_ms)
 
 
 def send_contact_requirement_emails(data: dict, file_data: bytes = None, filename: str = None, content_type: str = None):

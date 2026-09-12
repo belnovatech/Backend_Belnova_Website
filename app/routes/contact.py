@@ -42,6 +42,7 @@ async def contact_requirement(
 ):
     import time
     t_start = time.perf_counter()
+    logger.info("[PERF] request_received (title=%s, email=%s)", title, email)
 
     # 1. Validation
     if not fullName.strip():
@@ -84,6 +85,9 @@ async def contact_requirement(
             detail="You must agree to the Privacy Policy and Terms & Conditions."
         )
 
+    t_form_parsed = time.perf_counter()
+    logger.info("[PERF] form_parsed (elapsed_ms=%d)", int((t_form_parsed - t_start) * 1000))
+
     # 2. Process optional file attachment safely into memory before response cycle ends
     attachment_filename = None
     attachment_content_type = None
@@ -96,7 +100,13 @@ async def contact_requirement(
         attachment_filename = attachment.filename
         attachment_content_type = attachment.content_type
 
-    t_val_read = time.perf_counter()
+    t_attachment = time.perf_counter()
+    logger.info(
+        "[PERF] attachment_processed (filename=%s, size_bytes=%d, elapsed_ms=%d)",
+        attachment_filename or "None",
+        attachment_size or 0,
+        int((t_attachment - t_form_parsed) * 1000)
+    )
 
     # 3. Save to database
     db_submission = ContactSubmission(
@@ -124,6 +134,11 @@ async def contact_requirement(
         db.commit()
         db.refresh(db_submission)
         t_db_end = time.perf_counter()
+        logger.info(
+            "[PERF] db_commit_complete (submission_id=%s, db_elapsed_ms=%d)",
+            db_submission.id,
+            int((t_db_end - t_db_start) * 1000)
+        )
     except Exception as e:
         db.rollback()
         logger.exception("Database error while saving contact submission: %s", e)
@@ -161,14 +176,8 @@ async def contact_requirement(
             content_type=attachment_content_type
         )
 
-    t_total = time.perf_counter() - t_start
-    logger.info(
-        "[PERF] /api/contact - sync_total=%.3fs (read/validate=%.3fs, db_commit=%.3fs, attachment_bytes=%d)",
-        t_total,
-        (t_val_read - t_start),
-        (t_db_end - t_db_start),
-        attachment_size or 0
-    )
+    t_total_ms = int((time.perf_counter() - t_start) * 1000)
+    logger.info("[PERF] response_returned (total_backend_ms=%d)", t_total_ms)
 
     # 5. Return success response matching the required template format
     return {
