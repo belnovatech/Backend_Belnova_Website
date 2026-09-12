@@ -23,6 +23,11 @@ def _resolve_database_url(raw_url: str) -> str:
             target_host = f"{parsed.hostname}.{region}-postgres.render.com"
             netloc = parsed.netloc.replace(parsed.hostname, target_host)
             url = parsed._replace(netloc=netloc).geturl()
+        
+        # Render external Postgres connections require SSL
+        if "sslmode" not in url and "-postgres.render.com" in url:
+            separator = "&" if "?" in url else "?"
+            url = f"{url}{separator}sslmode=require"
     except Exception:
         pass
     return url
