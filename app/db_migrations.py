@@ -85,3 +85,20 @@ def run_database_migrations():
     except Exception:
         logger.exception("Error executing database schema migration for contact_submissions.")
         raise
+
+
+def get_table_schema() -> list:
+    """Returns the list of column details from contact_submissions."""
+    run_database_migrations()
+    with engine.connect() as conn:
+        inspector = inspect(conn)
+        cols = inspector.get_columns("contact_submissions")
+        return [
+            {
+                "name": c["name"],
+                "type": str(c["type"]),
+                "nullable": c["nullable"]
+            }
+            for c in cols
+        ]
+

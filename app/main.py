@@ -64,3 +64,21 @@ def home():
     return {
         "message": "Backend Running Successfully"
     }
+
+
+@app.get("/api/health")
+def health():
+    try:
+        from app.db_migrations import get_table_schema
+        cols = get_table_schema()
+        return {
+            "status": "healthy",
+            "database": "connected",
+            "columns": cols
+        }
+    except Exception as e:
+        logger.exception("Health check failed: %s", e)
+        return {
+            "status": "unhealthy",
+            "error": f"{type(e).__name__}: {str(e)}"
+        }
