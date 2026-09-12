@@ -148,19 +148,7 @@ def _send_contact_requirement_emails_impl(data: dict, file_data: bytes = None, f
     logger.info("[EMAIL] Background email task START for %s (email: %s)", data.get("project_title"), data.get("work_email"))
     sender_email = _get_sender_email()
 
-    # 1. Read and base64-encode the logo for inline HTML embedding
-    logo_path = "app/static/belnova-logo.png"
-    logo_data_uri = ""
-    if os.path.exists(logo_path):
-        try:
-            with open(logo_path, "rb") as f:
-                logo_bytes = f.read()
-            logo_base64 = base64.b64encode(logo_bytes).decode()
-            logo_data_uri = f"data:image/png;base64,{logo_base64}"
-        except Exception as e:
-            logger.warning("Could not read inline logo: %s", e)
-
-    # 2. Escape fields for safe HTML rendering to prevent HTML injection
+    # 1. Escape fields for safe HTML rendering to prevent HTML injection
     escaped = {
         k: html.escape(str(v)) if v is not None else "Not provided"
         for k, v in data.items()
@@ -174,361 +162,203 @@ def _send_contact_requirement_emails_impl(data: dict, file_data: bytes = None, f
     elif filename:
         attachment_info = html.escape(filename)
 
-    logo_img_tag = f'<img src="{logo_data_uri}" alt="Belnova Tech" style="max-height: 45px; display: inline-block;">' if logo_data_uri else '<h2 style="color: #ffffff; margin: 0;">Belnova Tech</h2>'
+    # 2. Dynamic HTML templates
+    admin_html = f"""<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>New Website Requirement</title>
+</head>
+<body style="margin: 0; padding: 0; background-color: #f8fafc; font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Helvetica, Arial, sans-serif; color: #334155;">
+  <table role="presentation" width="100%" border="0" cellspacing="0" cellpadding="0" style="background-color: #f8fafc; padding: 24px 12px;">
+    <tr>
+      <td align="center">
+        <table role="presentation" width="100%" border="0" cellspacing="0" cellpadding="0" style="max-width: 600px; background-color: #ffffff; border-radius: 8px; overflow: hidden; border: 1px solid #e2e8f0;">
+          <tr>
+            <td style="background-color: #0b1120; padding: 24px 20px; text-align: center;">
+              <div style="font-size: 20px; font-weight: 800; letter-spacing: 2.5px; color: #ffffff; text-transform: uppercase;">
+                BELNOVA <span style="color: #06b6d4;">TECH</span>
+              </div>
+              <div style="font-size: 10px; font-weight: 600; letter-spacing: 3px; color: #94a3b8; text-transform: uppercase; margin-top: 4px;">
+                PRIVATE LIMITED
+              </div>
+              <table role="presentation" width="100%" border="0" cellspacing="0" cellpadding="0" style="margin-top: 14px;">
+                <tr>
+                  <td style="height: 3px; background: #06b6d4; width: 50%; font-size: 0; line-height: 0;">&nbsp;</td>
+                  <td style="height: 3px; background: #8b5cf6; width: 50%; font-size: 0; line-height: 0;">&nbsp;</td>
+                </tr>
+              </table>
+            </td>
+          </tr>
+          <tr>
+            <td style="padding: 28px 24px;">
+              <h2 style="font-size: 18px; font-weight: 700; color: #0f172a; margin: 0 0 16px 0; text-transform: uppercase; letter-spacing: 0.5px; border-bottom: 2px solid #f1f5f9; padding-bottom: 8px;">
+                New Website Requirement
+              </h2>
+              <p style="font-size: 14px; line-height: 1.5; color: #475569; margin-bottom: 20px;">
+                A new requirement has been submitted through the Belnova Tech website contact form.
+              </p>
 
-    # 3. Dynamic HTML templates
-    admin_html = f"""
-    <!DOCTYPE html>
-    <html>
-    <head>
-      <meta charset="utf-8">
-      <meta name="viewport" content="width=device-width, initial-scale=1.0">
-      <title>New Website Requirement</title>
-      <style>
-        body {{
-          font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;
-          background-color: #f8fafc;
-          color: #334155;
-          margin: 0;
-          padding: 0;
-          -webkit-font-smoothing: antialiased;
-        }}
-        .wrapper {{
-          width: 100%;
-          background-color: #f8fafc;
-          padding: 40px 20px;
-          box-sizing: border-box;
-        }}
-        .container {{
-          max-width: 600px;
-          margin: 0 auto;
-          background-color: #ffffff;
-          border-radius: 12px;
-          overflow: hidden;
-          box-shadow: 0 4px 6px -1px rgba(0, 0, 0, 0.05), 0 2px 4px -2px rgba(0, 0, 0, 0.05);
-          border: 1px solid #e2e8f0;
-        }}
-        .header {{
-          background-color: #0f172a;
-          padding: 30px;
-          text-align: center;
-          border-bottom: 3px solid #6366f1;
-        }}
-        .content {{
-          padding: 40px 30px;
-        }}
-        .title {{
-          font-size: 20px;
-          font-weight: 700;
-          color: #0f172a;
-          margin-top: 0;
-          margin-bottom: 25px;
-          text-transform: uppercase;
-          letter-spacing: 0.05em;
-          border-bottom: 2px solid #f1f5f9;
-          padding-bottom: 10px;
-        }}
-        .section-title {{
-          font-size: 14px;
-          font-weight: 700;
-          color: #6366f1;
-          text-transform: uppercase;
-          letter-spacing: 0.05em;
-          margin-top: 25px;
-          margin-bottom: 15px;
-        }}
-        .info-table {{
-          width: 100%;
-          border-collapse: collapse;
-          margin-bottom: 15px;
-        }}
-        .info-table td {{
-          padding: 10px 0;
-          border-bottom: 1px solid #f1f5f9;
-          vertical-align: top;
-        }}
-        .info-table td.label {{
-          width: 35%;
-          font-weight: 600;
-          color: #475569;
-          font-size: 14px;
-        }}
-        .info-table td.value {{
-          color: #0f172a;
-          font-size: 14px;
-        }}
-        .message-box {{
-          background-color: #f8fafc;
-          border-left: 4px solid #6366f1;
-          padding: 15px 20px;
-          border-radius: 0 8px 8px 0;
-          margin-top: 10px;
-          font-size: 14px;
-          line-height: 1.6;
-          color: #334155;
-          white-space: pre-wrap;
-        }}
-        .footer {{
-          background-color: #f1f5f9;
-          padding: 30px;
-          text-align: center;
-          font-size: 12px;
-          color: #64748b;
-          border-top: 1px solid #e2e8f0;
-        }}
-        .footer p {{
-          margin: 5px 0;
-        }}
-        .footer-tagline {{
-          font-weight: 600;
-          color: #475569;
-          margin-top: 10px !important;
-        }}
-      </style>
-    </head>
-    <body>
-      <div class="wrapper">
-        <div class="container">
-          <div class="header">
-            {logo_img_tag}
-          </div>
-          <div class="content">
-            <h2 class="title">New Website Requirement</h2>
-            <p style="font-size: 14px; line-height: 1.5; color: #475569; margin-bottom: 20px;">
-              A new requirement has been submitted through the Belnova Tech website contact form.
-            </p>
-            
-            <h3 class="section-title">Contact Information</h3>
-            <table class="info-table">
-              <tr>
-                <td class="label">Full Name</td>
-                <td class="value">{escaped['full_name']}</td>
-              </tr>
-              <tr>
-                <td class="label">Company Name</td>
-                <td class="value">{escaped['company_name']}</td>
-              </tr>
-              <tr>
-                <td class="label">Work Email</td>
-                <td class="value">{escaped['work_email']}</td>
-              </tr>
-              <tr>
-                <td class="label">Phone Number</td>
-                <td class="value">{escaped['phone_number']}</td>
-              </tr>
-              <tr>
-                <td class="label">Country</td>
-                <td class="value">{escaped['country']}</td>
-              </tr>
-            </table>
-            
-            <h3 class="section-title">Requirement Details</h3>
-            <table class="info-table">
-              <tr>
-                <td class="label">Looking For</td>
-                <td class="value">{escaped['looking_for']}</td>
-              </tr>
-              <tr>
-                <td class="label">Project Title</td>
-                <td class="value">{escaped['project_title']}</td>
-              </tr>
-              <tr>
-                <td class="label">Expected Timeline</td>
-                <td class="value">{escaped['expected_timeline']}</td>
-              </tr>
-              <tr>
-                <td class="label">Budget Range</td>
-                <td class="value">{escaped['budget_range']}</td>
-              </tr>
-              <tr>
-                <td class="label">Tech Preferences</td>
-                <td class="value">{escaped['technology_preferences']}</td>
-              </tr>
-              <tr>
-                <td class="label">How Did They Hear</td>
-                <td class="value">{escaped['how_did_you_hear']}</td>
-              </tr>
-              <tr>
-                <td class="label">Attachment</td>
-                <td class="value">{attachment_info}</td>
-              </tr>
-            </table>
-            
-            <h3 class="section-title">Requirement Description</h3>
-            <div class="message-box">{escaped['requirement_description']}</div>
-          </div>
-          <div class="footer">
-            <p><strong>Belnova Tech Private Limited</strong></p>
-            <p>4th & 5th, Kondapur, 2-91/12/4/NR, Plot No. 4, Doc Bhavan, Hyderabad, Telangana 500081</p>
-            <p>Email: info@belnovatech.com | Web: belnovatech.com</p>
-            <p class="footer-tagline">Innovate Today. Build the Future.</p>
-          </div>
-        </div>
-      </div>
-    </body>
-    </html>
-    """
+              <div style="font-size: 12px; font-weight: 700; color: #6366f1; text-transform: uppercase; letter-spacing: 0.5px; margin-bottom: 8px;">
+                Contact Information
+              </div>
+              <table role="presentation" width="100%" border="0" cellspacing="0" cellpadding="0" style="font-size: 13px; margin-bottom: 20px; border-collapse: collapse;">
+                <tr><td style="padding: 6px 0; border-bottom: 1px solid #f1f5f9; color: #64748b; font-weight: 600; width: 35%;">Full Name:</td><td style="padding: 6px 0; border-bottom: 1px solid #f1f5f9; color: #0f172a; font-weight: 600;">{escaped['full_name']}</td></tr>
+                <tr><td style="padding: 6px 0; border-bottom: 1px solid #f1f5f9; color: #64748b; font-weight: 600;">Company Name:</td><td style="padding: 6px 0; border-bottom: 1px solid #f1f5f9; color: #0f172a;">{escaped['company_name']}</td></tr>
+                <tr><td style="padding: 6px 0; border-bottom: 1px solid #f1f5f9; color: #64748b; font-weight: 600;">Work Email:</td><td style="padding: 6px 0; border-bottom: 1px solid #f1f5f9; color: #0f172a;">{escaped['work_email']}</td></tr>
+                <tr><td style="padding: 6px 0; border-bottom: 1px solid #f1f5f9; color: #64748b; font-weight: 600;">Phone Number:</td><td style="padding: 6px 0; border-bottom: 1px solid #f1f5f9; color: #0f172a;">{escaped['phone_number']}</td></tr>
+                <tr><td style="padding: 6px 0; border-bottom: 1px solid #f1f5f9; color: #64748b; font-weight: 600;">Country:</td><td style="padding: 6px 0; border-bottom: 1px solid #f1f5f9; color: #0f172a;">{escaped['country']}</td></tr>
+              </table>
 
-    customer_html = f"""
-    <!DOCTYPE html>
-    <html>
-    <head>
-      <meta charset="utf-8">
-      <meta name="viewport" content="width=device-width, initial-scale=1.0">
-      <title>We've Received Your Requirement – Belnova Tech</title>
-      <style>
-        body {{
-          font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;
-          background-color: #f8fafc;
-          color: #334155;
-          margin: 0;
-          padding: 0;
-          -webkit-font-smoothing: antialiased;
-        }}
-        .wrapper {{
-          width: 100%;
-          background-color: #f8fafc;
-          padding: 40px 20px;
-          box-sizing: border-box;
-        }}
-        .container {{
-          max-width: 600px;
-          margin: 0 auto;
-          background-color: #ffffff;
-          border-radius: 12px;
-          overflow: hidden;
-          box-shadow: 0 4px 6px -1px rgba(0, 0, 0, 0.05), 0 2px 4px -2px rgba(0, 0, 0, 0.05);
-          border: 1px solid #e2e8f0;
-        }}
-        .header {{
-          background-color: #0f172a;
-          padding: 30px;
-          text-align: center;
-          border-bottom: 3px solid #6366f1;
-        }}
-        .content {{
-          padding: 40px 30px;
-        }}
-        .greeting {{
-          font-size: 18px;
-          font-weight: 700;
-          color: #0f172a;
-          margin-top: 0;
-          margin-bottom: 15px;
-        }}
-        .intro {{
-          font-size: 14px;
-          line-height: 1.6;
-          color: #475569;
-          margin-bottom: 25px;
-        }}
-        .summary-card {{
-          background-color: #f8fafc;
-          border: 1px solid #e2e8f0;
-          border-radius: 8px;
-          padding: 20px;
-          margin-bottom: 25px;
-        }}
-        .summary-title {{
-          font-size: 13px;
-          font-weight: 700;
-          color: #6366f1;
-          text-transform: uppercase;
-          letter-spacing: 0.05em;
-          margin-top: 0;
-          margin-bottom: 15px;
-        }}
-        .summary-row {{
-          margin-bottom: 10px;
-          font-size: 14px;
-        }}
-        .summary-row:last-child {{
-          margin-bottom: 0;
-        }}
-        .summary-label {{
-          font-weight: 600;
-          color: #475569;
-        }}
-        .summary-value {{
-          color: #0f172a;
-        }}
-        .closing {{
-          font-size: 14px;
-          line-height: 1.6;
-          color: #475569;
-          margin-bottom: 20px;
-        }}
-        .signature {{
-          font-size: 14px;
-          color: #0f172a;
-          font-weight: 600;
-        }}
-        .footer {{
-          background-color: #f1f5f9;
-          padding: 30px;
-          text-align: center;
-          font-size: 12px;
-          color: #64748b;
-          border-top: 1px solid #e2e8f0;
-        }}
-        .footer p {{
-          margin: 5px 0;
-        }}
-        .footer-tagline {{
-          font-weight: 600;
-          color: #475569;
-          margin-top: 10px !important;
-        }}
-      </style>
-    </head>
-    <body>
-      <div class="wrapper">
-        <div class="container">
-          <div class="header">
-            {logo_img_tag}
-          </div>
-          <div class="content">
-            <h2 class="greeting">Hello {escaped['full_name']},</h2>
-            <p class="intro">
-              Thank you for reaching out to Belnova Tech. We have successfully received your project requirement, and our engineering team is reviewing it. We will get back to you within 24 hours.
-            </p>
-            
-            <div class="summary-card">
-              <h3 class="summary-title">Submission Summary</h3>
-              <div class="summary-row">
-                <span class="summary-label">Project Title:</span>
-                <span class="summary-value"> {escaped['project_title']}</span>
+              <div style="font-size: 12px; font-weight: 700; color: #6366f1; text-transform: uppercase; letter-spacing: 0.5px; margin-bottom: 8px;">
+                Requirement Details
               </div>
-              <div class="summary-row">
-                <span class="summary-label">Category:</span>
-                <span class="summary-value"> {escaped['looking_for']}</span>
+              <table role="presentation" width="100%" border="0" cellspacing="0" cellpadding="0" style="font-size: 13px; margin-bottom: 20px; border-collapse: collapse;">
+                <tr><td style="padding: 6px 0; border-bottom: 1px solid #f1f5f9; color: #64748b; font-weight: 600; width: 35%;">Looking For:</td><td style="padding: 6px 0; border-bottom: 1px solid #f1f5f9; color: #0f172a;">{escaped['looking_for']}</td></tr>
+                <tr><td style="padding: 6px 0; border-bottom: 1px solid #f1f5f9; color: #64748b; font-weight: 600;">Project Title:</td><td style="padding: 6px 0; border-bottom: 1px solid #f1f5f9; color: #0f172a; font-weight: 600;">{escaped['project_title']}</td></tr>
+                <tr><td style="padding: 6px 0; border-bottom: 1px solid #f1f5f9; color: #64748b; font-weight: 600;">Expected Timeline:</td><td style="padding: 6px 0; border-bottom: 1px solid #f1f5f9; color: #0f172a;">{escaped['expected_timeline']}</td></tr>
+                <tr><td style="padding: 6px 0; border-bottom: 1px solid #f1f5f9; color: #64748b; font-weight: 600;">Budget Range:</td><td style="padding: 6px 0; border-bottom: 1px solid #f1f5f9; color: #0f172a;">{escaped['budget_range']}</td></tr>
+                <tr><td style="padding: 6px 0; border-bottom: 1px solid #f1f5f9; color: #64748b; font-weight: 600;">Tech Preferences:</td><td style="padding: 6px 0; border-bottom: 1px solid #f1f5f9; color: #0f172a;">{escaped['technology_preferences']}</td></tr>
+                <tr><td style="padding: 6px 0; border-bottom: 1px solid #f1f5f9; color: #64748b; font-weight: 600;">How Did They Hear:</td><td style="padding: 6px 0; border-bottom: 1px solid #f1f5f9; color: #0f172a;">{escaped['how_did_you_hear']}</td></tr>
+                <tr><td style="padding: 6px 0; border-bottom: 1px solid #f1f5f9; color: #64748b; font-weight: 600;">Attachment:</td><td style="padding: 6px 0; border-bottom: 1px solid #f1f5f9; color: #0f172a;">{attachment_info}</td></tr>
+              </table>
+
+              <div style="font-size: 12px; font-weight: 700; color: #6366f1; text-transform: uppercase; letter-spacing: 0.5px; margin-bottom: 8px;">
+                Requirement Description
               </div>
-              <div class="summary-row">
-                <span class="summary-label">Expected Timeline:</span>
-                <span class="summary-value"> {escaped['expected_timeline']}</span>
-              </div>
-            </div>
-            
-            <p class="closing">
-              If we need any further details or clarifications, one of our solutions architects will reach out to you at this email address or your provided phone number.
-            </p>
-            
-            <p class="signature">
-              Best regards,<br>
-              <span style="color: #6366f1;">Belnova Tech Solutions Team</span>
-            </p>
-          </div>
-          <div class="footer">
-            <p><strong>Belnova Tech Private Limited</strong></p>
-            <p>4th & 5th, Kondapur, 2-91/12/4/NR, Plot No. 4, Doc Bhavan, Hyderabad, Telangana 500081</p>
-            <p>Email: info@belnovatech.com | Web: belnovatech.com</p>
-            <p class="footer-tagline">Innovate Today. Build the Future.</p>
-          </div>
-        </div>
-      </div>
-    </body>
-    </html>
-    """
+              <div style="background-color: #f8fafc; border-left: 4px solid #6366f1; padding: 14px 16px; border-radius: 0 6px 6px 0; font-size: 13px; line-height: 1.6; color: #334155; white-space: pre-wrap;">{escaped['requirement_description']}</div>
+            </td>
+          </tr>
+          <tr>
+            <td style="background-color: #f1f5f9; padding: 20px; text-align: center; border-top: 1px solid #e2e8f0; font-size: 12px; color: #64748b;">
+              <p style="margin: 0 0 4px 0; font-weight: 700; color: #334155;">Belnova Tech Private Limited</p>
+              <p style="margin: 0 0 6px 0;">4th & 5th Floor, Kondapur, Hyderabad, Telangana 500081</p>
+              <p style="margin: 0;">Email: info@belnovatech.com | Web: belnovatech.com</p>
+            </td>
+          </tr>
+        </table>
+      </td>
+    </tr>
+  </table>
+</body>
+</html>"""
+
+    customer_html = f"""<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>We've Received Your Requirement – Belnova Tech</title>
+</head>
+<body style="margin: 0; padding: 0; background-color: #f8fafc; font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Helvetica, Arial, sans-serif; -webkit-font-smoothing: antialiased; color: #334155;">
+  <table role="presentation" width="100%" border="0" cellspacing="0" cellpadding="0" style="background-color: #f8fafc; padding: 30px 12px;">
+    <tr>
+      <td align="center">
+        <table role="presentation" width="100%" border="0" cellspacing="0" cellpadding="0" style="max-width: 600px; background-color: #ffffff; border-radius: 8px; overflow: hidden; border: 1px solid #e2e8f0; box-shadow: 0 2px 4px rgba(0,0,0,0.04);">
+          
+          <!-- Header -->
+          <tr>
+            <td style="background-color: #0b1120; padding: 26px 24px; text-align: center;">
+              <table role="presentation" width="100%" border="0" cellspacing="0" cellpadding="0">
+                <tr>
+                  <td align="center">
+                    <div style="font-size: 22px; font-weight: 800; letter-spacing: 2.5px; color: #ffffff; text-transform: uppercase; margin: 0;">
+                      BELNOVA <span style="color: #06b6d4;">TECH</span>
+                    </div>
+                    <div style="font-size: 10px; font-weight: 600; letter-spacing: 3px; color: #94a3b8; text-transform: uppercase; margin-top: 5px;">
+                      PRIVATE LIMITED
+                    </div>
+                  </td>
+                </tr>
+                <tr>
+                  <td style="padding-top: 18px;">
+                    <!-- Cyan to Purple Accent Line -->
+                    <table role="presentation" width="100%" border="0" cellspacing="0" cellpadding="0">
+                      <tr>
+                        <td style="height: 3px; background: #06b6d4; width: 50%; font-size: 0; line-height: 0;">&nbsp;</td>
+                        <td style="height: 3px; background: #8b5cf6; width: 50%; font-size: 0; line-height: 0;">&nbsp;</td>
+                      </tr>
+                    </table>
+                  </td>
+                </tr>
+              </table>
+            </td>
+          </tr>
+
+          <!-- Body Content -->
+          <tr>
+            <td style="padding: 32px 28px;">
+              <p style="font-size: 16px; font-weight: 700; color: #0f172a; margin: 0 0 16px 0;">
+                Hello {escaped['full_name']},
+              </p>
+              
+              <p style="font-size: 14px; line-height: 1.6; color: #334155; margin: 0 0 24px 0;">
+                Thank you for reaching out to <strong>Belnova Tech</strong>. We have successfully received your project requirement, and our engineering team is reviewing it. We will get back to you within <strong>24 hours</strong>.
+              </p>
+
+              <!-- Submission Summary Card -->
+              <table role="presentation" width="100%" border="0" cellspacing="0" cellpadding="0" style="background-color: #f8fafc; border: 1px solid #e2e8f0; border-radius: 6px; margin: 0 0 24px 0;">
+                <tr>
+                  <td style="padding: 18px 20px;">
+                    <div style="font-size: 11px; font-weight: 700; color: #6366f1; text-transform: uppercase; letter-spacing: 1px; margin-bottom: 12px; border-bottom: 1px solid #e2e8f0; padding-bottom: 8px;">
+                      SUBMISSION SUMMARY
+                    </div>
+                    
+                    <table role="presentation" width="100%" border="0" cellspacing="0" cellpadding="0" style="font-size: 13px;">
+                      <tr>
+                        <td width="38%" style="padding: 6px 0; color: #64748b; font-weight: 600; vertical-align: top;">Project Title:</td>
+                        <td style="padding: 6px 0; color: #0f172a; font-weight: 600; vertical-align: top;">{escaped['project_title']}</td>
+                      </tr>
+                      <tr>
+                        <td style="padding: 6px 0; color: #64748b; font-weight: 600; vertical-align: top;">Category:</td>
+                        <td style="padding: 6px 0; color: #0f172a; vertical-align: top;">{escaped['looking_for']}</td>
+                      </tr>
+                      <tr>
+                        <td style="padding: 6px 0; color: #64748b; font-weight: 600; vertical-align: top;">Expected Timeline:</td>
+                        <td style="padding: 6px 0; color: #0f172a; vertical-align: top;">{escaped['expected_timeline']}</td>
+                      </tr>
+                    </table>
+                  </td>
+                </tr>
+              </table>
+
+              <p style="font-size: 14px; line-height: 1.6; color: #334155; margin: 0 0 24px 0;">
+                If we need any further details or clarification, one of our solutions architects will reach out to you using the email address or phone number you provided.
+              </p>
+
+              <table role="presentation" border="0" cellspacing="0" cellpadding="0" style="font-size: 14px; line-height: 1.5;">
+                <tr>
+                  <td style="color: #0f172a;">
+                    Best regards,<br>
+                    <strong style="color: #6366f1;">Belnova Tech Solutions Team</strong>
+                  </td>
+                </tr>
+              </table>
+            </td>
+          </tr>
+
+          <!-- Footer -->
+          <tr>
+            <td style="background-color: #f1f5f9; padding: 24px 20px; text-align: center; border-top: 1px solid #e2e8f0; font-size: 12px; color: #64748b;">
+              <p style="margin: 0 0 4px 0; font-weight: 700; color: #334155;">Belnova Tech Private Limited</p>
+              <p style="margin: 0 0 8px 0; line-height: 1.4;">4th & 5th Floor, Kondapur, Hyderabad, Telangana 500081</p>
+              <p style="margin: 0 0 12px 0;">
+                Email: <a href="mailto:info@belnovatech.com" style="color: #6366f1; text-decoration: none; font-weight: 600;">info@belnovatech.com</a> &nbsp;|&nbsp; 
+                Website: <a href="https://belnovatech.com" style="color: #6366f1; text-decoration: none; font-weight: 600;">belnovatech.com</a>
+              </p>
+              <p style="margin: 0; font-size: 11px; font-weight: 600; color: #94a3b8; letter-spacing: 0.5px;">
+                Innovate Today. Build the Future.
+              </p>
+            </td>
+          </tr>
+
+        </table>
+      </td>
+    </tr>
+  </table>
+</body>
+</html>"""
 
     # 4. Prepare and send Admin Notification Email (isolated in its own block)
     try:
