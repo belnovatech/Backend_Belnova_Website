@@ -8,6 +8,7 @@ from fastapi.middleware.cors import CORSMiddleware
 from app.routes.contact import router
 from app.database import engine, Base
 from app.models.contact import ContactSubmission
+from app.db_migrations import run_database_migrations
 
 logging.basicConfig(level=logging.INFO, format="%(asctime)s %(levelname)s %(name)s %(message)s")
 logger = logging.getLogger("app.main")
@@ -15,13 +16,13 @@ logger = logging.getLogger("app.main")
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
-    # Safe startup: initialize database tables
+    # Safe startup: initialize database tables and apply schema migrations
     try:
-        logger.info("Initializing database tables...")
-        Base.metadata.create_all(bind=engine)
-        logger.info("Database tables initialized successfully.")
+        logger.info("Initializing database tables and running migrations...")
+        run_database_migrations()
+        logger.info("Database initialized and migrations applied successfully.")
     except Exception:
-        logger.exception("Failed to initialize database tables during startup.")
+        logger.exception("Failed to initialize database tables or run migrations during startup.")
     yield
 
 
