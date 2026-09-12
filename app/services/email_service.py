@@ -34,15 +34,15 @@ def _get_sendgrid_client(timeout: int = 15) -> SendGridAPIClient:
     return sg
 
 
-def _send_sendgrid_mail(sg: SendGridAPIClient, message: Mail, label: str):
+def _send_sendgrid_mail(sg: SendGridAPIClient, message: Mail, label: str) -> dict:
     try:
         response = sg.send(message)
     except UnauthorizedError as exc:
         body = getattr(exc, "body", b"")
         body_text = body.decode("utf-8", errors="replace") if isinstance(body, (bytes, bytearray)) else str(body)
         logger.error(
-            "SendGrid %s failed: 401 Unauthorized – API key is invalid, expired, or revoked. "
-            "SendGrid error body: %s",
+            "SendGrid %s FAILED: 401 Unauthorized – The SENDGRID_API_KEY is invalid, expired, or revoked. "
+            "SendGrid response: %s",
             label, body_text
         )
         raise RuntimeError(f"SendGrid {label} rejected with 401 Unauthorized: {body_text}") from exc
@@ -50,13 +50,13 @@ def _send_sendgrid_mail(sg: SendGridAPIClient, message: Mail, label: str):
         body = getattr(exc, "body", b"")
         body_text = body.decode("utf-8", errors="replace") if isinstance(body, (bytes, bytearray)) else str(body)
         logger.error(
-            "SendGrid %s failed: 403 Forbidden – sender email may not be verified. "
-            "SendGrid error body: %s",
+            "SendGrid %s FAILED: 403 Forbidden – The sender email may not be verified in SendGrid (Single Sender Verification or Domain Authentication required). "
+            "SendGrid response: %s",
             label, body_text
         )
         raise RuntimeError(f"SendGrid {label} rejected with 403 Forbidden: {body_text}") from exc
     except (TimeoutError, URLError, socket.timeout) as exc:
-        logger.error("SendGrid %s timed out or network unreachable: %s", label, exc)
+        logger.error("SendGrid %s connection timed out or network unreachable: %s", label, exc)
         raise RuntimeError(f"SendGrid {label} connection timeout: {exc}") from exc
     except HTTPError as exc:
         body = getattr(exc, "body", b"")
@@ -68,15 +68,20 @@ def _send_sendgrid_mail(sg: SendGridAPIClient, message: Mail, label: str):
         raise
 
     status_code = getattr(response, "status_code", None)
+    headers = getattr(response, "headers", {})
+    message_id = headers.get("X-Message-Id") or headers.get("x-message-id") or "N/A"
+
     if status_code is None:
         logger.warning("SendGrid response did not include status code for %s", label)
-        return
+        return {"status_code": None, "message_id": message_id}
     if status_code < 200 or status_code >= 300:
         body = getattr(response, "body", b"")
         body_text = body.decode("utf-8", errors="replace") if isinstance(body, (bytes, bytearray)) else str(body)
         logger.error("SendGrid %s failed with status %s: %s", label, status_code, body_text[:500])
         raise RuntimeError(f"SendGrid {label} failed with status {status_code}: {body_text[:250]}")
-    logger.info("SendGrid accepted %s email with status=%s", label, status_code)
+    
+    logger.info("SendGrid accepted %s email [status=%s, message_id=%s]", label, status_code, message_id)
+    return {"status_code": status_code, "message_id": message_id}
 
 
 def send_contact_email(data):
@@ -87,99 +92,56 @@ def send_contact_email(data):
         # ==========================
         # Admin Email
         # ==========================
-
-        admin_html = f"""
-        <h2>New Contact Form Submission</h2>
-
-        <p><b>Name:</b> {data.name}</p>
-        <p><b>Email:</b> {data.email}</p>
-        <p><b>Phone:</b> {data.phone}</p>
-        <p><b>Subject:</b> {data.subject}</p>
-        <p><b>Message:</b></p>
-
-        <p>{data.message}</p>
-        """
-
-        admin_mail = Mail(
-            from_email=sender_email,
-            to_emails=sender_email,
-            subject=f"New Website Enquiry - {data.subject}",
-            html_content=admin_html
-        )
-
-        _send_sendgrid_mail(sg, admin_mail, "admin contact")
+        try:
+            admin_html = f"""
+            <h2>New Contact Form Submission</h2>
+            <p><b>Name:</b> {html.escape(str(data.name))}</p>
+            <p><b>Email:</b> {html.escape(str(data.email))}</p>
+            <p><b>Phone:</b> {html.escape(str(data.phone))}</p>
+            <p><b>Subject:</b> {html.escape(str(data.subject))}</p>
+            <p><b>Message:</b></p>
+            <p>{html.escape(str(data.message))}</p>
+            """
+            admin_mail = Mail(
+                from_email=sender_email,
+                to_emails=sender_email,
+                subject=f"New Website Enquiry - {data.subject}",
+                html_content=admin_html
+            )
+            _send_sendgrid_mail(sg, admin_mail, "admin contact")
+        except Exception as exc:
+            logger.error("Failed sending admin contact email: %s", exc)
 
         # ==========================
         # Customer Auto Reply
         # ==========================
-
-        customer_html = f"""
-        <html>
-
-        <body
-        style="font-family:Arial;
-        background:#f5f7fb;
-        padding:30px;">
-
-        <h2>Hello {data.name},</h2>
-
-        <p>
-
-        Thank you for contacting
-        <b>Belnova Technologies.</b>
-
-        </p>
-
-        <p>
-
-        We have received your enquiry.
-
-        </p>
-
-        <p>
-
-        Our team will contact you within
-        <b>24 hours.</b>
-
-        </p>
-
-        <hr>
-
-        <b>Your Subject:</b>
-
-        {data.subject}
-
-        <br><br>
-
-        <b>Your Message:</b>
-
-        <br>
-
-        {data.message}
-
-        <br><br>
-
-        📞 +91 7382405380
-
-        <br>
-
-        📧 info@belnovatech.com
-
-        </body>
-
-        </html>
-        """
-
-        reply_mail = Mail(
-            from_email=sender_email,
-            to_emails=data.email,
-            subject="Thank You for Contacting Belnova Technologies",
-            html_content=customer_html
-        )
-
-        _send_sendgrid_mail(sg, reply_mail, "customer auto-reply")
+        try:
+            customer_html = f"""
+            <html>
+            <body style="font-family:Arial;background:#f5f7fb;padding:30px;">
+            <h2>Hello {html.escape(str(data.name))},</h2>
+            <p>Thank you for contacting <b>Belnova Technologies.</b></p>
+            <p>We have received your enquiry.</p>
+            <p>Our team will contact you within <b>24 hours.</b></p>
+            <hr>
+            <b>Your Subject:</b> {html.escape(str(data.subject))}<br><br>
+            <b>Your Message:</b><br>{html.escape(str(data.message))}<br><br>
+            📞 +91 7382405380<br>
+            📧 info@belnovatech.com
+            </body>
+            </html>
+            """
+            reply_mail = Mail(
+                from_email=sender_email,
+                to_emails=data.email,
+                subject="Thank You for Contacting Belnova Technologies",
+                html_content=customer_html
+            )
+            _send_sendgrid_mail(sg, reply_mail, "customer auto-reply")
+        except Exception as exc:
+            logger.error("Failed sending customer auto-reply email: %s", exc)
     except Exception as exc:
-        logger.exception("Background contact email delivery failed for %s: %s", getattr(data, "email", "unknown"), exc)
+        logger.exception("Background contact email delivery failed: %s", exc)
 
 
 def _send_contact_requirement_emails_impl(data: dict, file_data: bytes = None, filename: str = None, content_type: str = None):
@@ -190,16 +152,19 @@ def _send_contact_requirement_emails_impl(data: dict, file_data: bytes = None, f
     logo_path = "app/static/belnova-logo.png"
     logo_attachment = None
     if os.path.exists(logo_path):
-        with open(logo_path, "rb") as f:
-            logo_bytes = f.read()
-        logo_base64 = base64.b64encode(logo_bytes).decode()
-        logo_attachment = Attachment(
-            FileContent(logo_base64),
-            FileName("belnova-logo.png"),
-            FileType("image/png"),
-            Disposition("inline"),
-            ContentId("belnova_logo")
-        )
+        try:
+            with open(logo_path, "rb") as f:
+                logo_bytes = f.read()
+            logo_base64 = base64.b64encode(logo_bytes).decode()
+            logo_attachment = Attachment(
+                FileContent(logo_base64),
+                FileName("belnova-logo.png"),
+                FileType("image/png"),
+                Disposition("inline"),
+                ContentId("belnova_logo")
+            )
+        except Exception as e:
+            logger.warning("Could not attach inline logo: %s", e)
 
     # 2. Escape fields for safe HTML rendering to prevent HTML injection
     escaped = {
@@ -577,44 +542,54 @@ def _send_contact_requirement_emails_impl(data: dict, file_data: bytes = None, f
     </html>
     """
 
-    # 4. Prepare and send Admin Notification Email
-    admin_mail = Mail(
-        from_email=sender_email,
-        to_emails="info@belnovatech.com",
-        subject=f"New Website Requirement – {data['project_title']}",
-        html_content=admin_html
-    )
-    # Set reply-to customer email
-    admin_mail.reply_to = ReplyTo(data['work_email'])
-
-    # Add inline logo
-    if logo_attachment:
-        admin_mail.add_attachment(logo_attachment)
-
-    # Add optional user file attachment
-    if file_data and filename:
-        file_base64 = base64.b64encode(file_data).decode()
-        user_attachment = Attachment(
-            FileContent(file_base64),
-            FileName(filename),
-            FileType(content_type or "application/octet-stream"),
-            Disposition("attachment")
+    # 4. Prepare and send Admin Notification Email (isolated in its own block)
+    try:
+        admin_mail = Mail(
+            from_email=sender_email,
+            to_emails="info@belnovatech.com",
+            subject=f"New Website Requirement – {data['project_title']}",
+            html_content=admin_html
         )
-        admin_mail.add_attachment(user_attachment)
+        # Set reply-to customer email
+        admin_mail.reply_to = ReplyTo(data['work_email'])
 
-    _send_sendgrid_mail(sg, admin_mail, "admin requirement notification")
+        # Add inline logo
+        if logo_attachment:
+            admin_mail.add_attachment(logo_attachment)
 
-    # 5. Prepare and send Customer Auto-Reply Email
-    customer_mail = Mail(
-        from_email=sender_email,
-        to_emails=data['work_email'],
-        subject="We've Received Your Requirement – Belnova Tech",
-        html_content=customer_html
-    )
-    if logo_attachment:
-        customer_mail.add_attachment(logo_attachment)
+        # Add optional user file attachment to admin email (safely handle size limits)
+        if file_data and filename:
+            # Check attachment size: SendGrid total message payload limit is typically 20-30MB
+            if len(file_data) <= 12 * 1024 * 1024:
+                file_base64 = base64.b64encode(file_data).decode()
+                user_attachment = Attachment(
+                    FileContent(file_base64),
+                    FileName(filename),
+                    FileType(content_type or "application/octet-stream"),
+                    Disposition("attachment")
+                )
+                admin_mail.add_attachment(user_attachment)
+            else:
+                logger.warning("Attachment %s exceeds 12MB limit for email payload (%d bytes); omitted from email.", filename, len(file_data))
 
-    _send_sendgrid_mail(sg, customer_mail, "customer requirement auto-reply")
+        _send_sendgrid_mail(sg, admin_mail, "admin requirement notification")
+    except Exception as exc:
+        logger.error("Failed to send admin requirement notification email: %s", exc)
+
+    # 5. Prepare and send Customer Auto-Reply Email (isolated in its own block)
+    try:
+        customer_mail = Mail(
+            from_email=sender_email,
+            to_emails=data['work_email'],
+            subject="We've Received Your Requirement – Belnova Tech",
+            html_content=customer_html
+        )
+        if logo_attachment:
+            customer_mail.add_attachment(logo_attachment)
+
+        _send_sendgrid_mail(sg, customer_mail, "customer requirement auto-reply")
+    except Exception as exc:
+        logger.error("Failed to send customer requirement auto-reply email: %s", exc)
 
 
 def send_contact_requirement_emails(data: dict, file_data: bytes = None, filename: str = None, content_type: str = None):
@@ -626,5 +601,5 @@ def send_contact_requirement_emails(data: dict, file_data: bytes = None, filenam
             content_type=content_type
         )
     except Exception as exc:
-        logger.exception("Background requirement email delivery failed for %s: %s", data.get("work_email", "unknown"), exc)
+        logger.exception("Background requirement email delivery encountered top-level error: %s", exc)
 

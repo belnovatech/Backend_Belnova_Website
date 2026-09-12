@@ -40,6 +40,9 @@ async def contact_requirement(
     background_tasks: BackgroundTasks = None,
     db: Session = Depends(get_db)
 ):
+    import time
+    t_start = time.perf_counter()
+
     # 1. Validation
     if not fullName.strip():
         raise HTTPException(
@@ -93,6 +96,8 @@ async def contact_requirement(
         attachment_filename = attachment.filename
         attachment_content_type = attachment.content_type
 
+    t_val_read = time.perf_counter()
+
     # 3. Save to database
     db_submission = ContactSubmission(
         full_name=fullName.strip(),
@@ -114,9 +119,11 @@ async def contact_requirement(
     )
 
     try:
+        t_db_start = time.perf_counter()
         db.add(db_submission)
         db.commit()
         db.refresh(db_submission)
+        t_db_end = time.perf_counter()
     except Exception as e:
         db.rollback()
         logger.exception("Database error while saving contact submission: %s", e)
@@ -149,6 +156,15 @@ async def contact_requirement(
             filename=attachment_filename,
             content_type=attachment_content_type
         )
+
+    t_total = time.perf_counter() - t_start
+    logger.info(
+        "[PERF] /api/contact - sync_total=%.3fs (read/validate=%.3fs, db_commit=%.3fs, attachment_bytes=%d)",
+        t_total,
+        (t_val_read - t_start),
+        (t_db_end - t_db_start),
+        attachment_size or 0
+    )
 
     # 5. Return success response matching the required template format
     return {
