@@ -35,10 +35,10 @@ def run_database_migrations():
     """
     logger.info("Checking database schema for contact_submissions...")
     
-    # First, make sure the table exists
-    Base.metadata.create_all(bind=engine)
-
     try:
+        # First, make sure the table exists
+        Base.metadata.create_all(bind=engine)
+
         with engine.begin() as conn:
             # Query existing columns in contact_submissions
             inspector = inspect(conn)

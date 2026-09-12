@@ -1,3 +1,4 @@
+import asyncio
 import logging
 import os
 from contextlib import asynccontextmanager
@@ -16,13 +17,16 @@ logger = logging.getLogger("app.main")
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
-    # Safe startup: initialize database tables and apply schema migrations
-    try:
-        logger.info("Initializing database tables and running migrations...")
-        run_database_migrations()
-        logger.info("Database initialized and migrations applied successfully.")
-    except Exception:
-        logger.exception("Failed to initialize database tables or run migrations during startup.")
+    # Non-blocking startup: start HTTP server immediately, run DB migrations in background task
+    async def _async_startup_migrate():
+        try:
+            logger.info("Initializing database tables and running migrations in background...")
+            await asyncio.to_thread(run_database_migrations)
+            logger.info("Database initialized and migrations applied successfully.")
+        except Exception as e:
+            logger.warning("Background database migration deferred: %s", e)
+
+    asyncio.create_task(_async_startup_migrate())
     yield
 
 
@@ -64,6 +68,16 @@ def home():
     return {
         "message": "Backend Running Successfully"
     }
+
+
+@app.get("/health")
+def liveness_health():
+    """Lightweight health check that returns immediately without DB overhead."""
+    return {
+        "status": "ok",
+        "service": "Belnova Backend API"
+    }
+
 
 
 @app.get("/api/health")
