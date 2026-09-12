@@ -16,6 +16,8 @@ Base = declarative_base()
 
 # Database session dependency
 def get_db():
+    from app.db_migrations import ensure_database_migrated
+    ensure_database_migrated()
     db = SessionLocal()
     try:
         yield db

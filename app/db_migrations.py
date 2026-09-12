@@ -87,9 +87,27 @@ def run_database_migrations():
         raise
 
 
+import threading
+
+_migration_lock = threading.Lock()
+_migration_completed = False
+
+
+def ensure_database_migrated():
+    """Thread-safe on-demand migration trigger ensuring schema is migrated before any query."""
+    global _migration_completed
+    if _migration_completed:
+        return
+    with _migration_lock:
+        if _migration_completed:
+            return
+        run_database_migrations()
+        _migration_completed = True
+
+
 def get_table_schema() -> list:
     """Returns the list of column details from contact_submissions."""
-    run_database_migrations()
+    ensure_database_migrated()
     with engine.connect() as conn:
         inspector = inspect(conn)
         cols = inspector.get_columns("contact_submissions")
@@ -101,4 +119,5 @@ def get_table_schema() -> list:
             }
             for c in cols
         ]
+
 
