@@ -37,7 +37,7 @@ async def contact_requirement(
     budget: str = Form(None),
     source: str = Form(None),
     attachment: UploadFile = File(None),
-    background_tasks: BackgroundTasks = None,
+    background_tasks: BackgroundTasks = BackgroundTasks(),
     db: Session = Depends(get_db)
 ):
     import time
@@ -149,6 +149,10 @@ async def contact_requirement(
     }
 
     if background_tasks is not None:
+        logger.info(
+            "[EMAIL] Enqueued background email task for submission #%s (title: %s, email: %s)",
+            db_submission.id, db_submission.project_title, db_submission.work_email
+        )
         background_tasks.add_task(
             send_contact_requirement_emails,
             data=email_payload,

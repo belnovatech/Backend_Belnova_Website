@@ -145,6 +145,7 @@ def send_contact_email(data):
 
 
 def _send_contact_requirement_emails_impl(data: dict, file_data: bytes = None, filename: str = None, content_type: str = None):
+    logger.info("[EMAIL] Background email task START for %s (email: %s)", data.get("project_title"), data.get("work_email"))
     sender_email = _get_sender_email()
 
     # 1. Read and base64-encode the logo for inline HTML embedding
@@ -531,6 +532,7 @@ def _send_contact_requirement_emails_impl(data: dict, file_data: bytes = None, f
 
     # 4. Prepare and send Admin Notification Email (isolated in its own block)
     try:
+        logger.info("[EMAIL] Sending admin notification to info@belnovatech.com")
         admin_payload = {
             "sender": {"name": "Belnova Tech", "email": sender_email},
             "to": [{"email": "info@belnovatech.com", "name": "Belnova Admin"}],
@@ -555,21 +557,34 @@ def _send_contact_requirement_emails_impl(data: dict, file_data: bytes = None, f
                     filename, len(file_data)
                 )
 
-        _send_brevo_email(admin_payload, "admin requirement notification")
+        res_admin = _send_brevo_email(admin_payload, "admin requirement notification")
+        logger.info(
+            "[EMAIL] Admin Brevo response status: %s (message_id=%s)",
+            res_admin.get("status_code"), res_admin.get("message_id")
+        )
     except Exception as exc:
-        logger.error("Failed to send admin requirement notification email: %s", exc)
+        logger.error("[EMAIL] Admin Brevo email FAILED: %s", exc)
 
     # 5. Prepare and send Customer Auto-Reply Email (isolated in its own block)
     try:
+        customer_email = data['work_email'].strip()
+        logger.info("[EMAIL] Sending customer auto-reply to %s", customer_email)
         customer_payload = {
             "sender": {"name": "Belnova Tech", "email": sender_email},
-            "to": [{"email": data['work_email'], "name": data.get('full_name', 'Customer')}],
+            "to": [{"email": customer_email, "name": data.get('full_name', 'Customer')}],
             "subject": "We've Received Your Requirement – Belnova Tech",
             "htmlContent": customer_html
         }
-        _send_brevo_email(customer_payload, "customer requirement auto-reply")
+        res_cust = _send_brevo_email(customer_payload, "customer requirement auto-reply")
+        logger.info("[EMAIL] Customer recipient: %s", customer_email)
+        logger.info(
+            "[EMAIL] Customer Brevo response status: %s (message_id=%s)",
+            res_cust.get("status_code"), res_cust.get("message_id")
+        )
     except Exception as exc:
-        logger.error("Failed to send customer requirement auto-reply email: %s", exc)
+        logger.error("[EMAIL] Customer Brevo auto-reply FAILED for %s: %s", data.get('work_email'), exc)
+
+    logger.info("[EMAIL] Background email task COMPLETE")
 
 
 def send_contact_requirement_emails(data: dict, file_data: bytes = None, filename: str = None, content_type: str = None):
@@ -581,4 +596,4 @@ def send_contact_requirement_emails(data: dict, file_data: bytes = None, filenam
             content_type=content_type
         )
     except Exception as exc:
-        logger.exception("Background requirement email delivery encountered top-level error: %s", exc)
+        logger.exception("[EMAIL] Background requirement email delivery encountered top-level error: %s", exc)

@@ -85,9 +85,11 @@ def health():
     try:
         from app.db_migrations import get_table_schema
         cols = get_table_schema()
+        brevo_key = os.getenv("BREVO_API_KEY", "").strip()
         return {
             "status": "healthy",
             "database": "connected",
+            "email_service": "configured" if bool(brevo_key) else "missing_BREVO_API_KEY",
             "columns": cols
         }
     except Exception as e:
