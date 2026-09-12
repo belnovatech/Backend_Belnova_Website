@@ -18,24 +18,11 @@ def _resolve_database_url(raw_url: str) -> str:
     try:
         parsed = urllib.parse.urlparse(url)
         # If the hostname is a bare Render internal ID without domain dots (e.g. dpg-daai4qp42hec73aigqeg-a)
-        if parsed.hostname and re.match(r"^dpg-[a-z0-9]+-a$", parsed.hostname):
-            # Test candidate hostnames to resolve DNS across regions
-            candidates = [
-                parsed.hostname,
-                f"{parsed.hostname}.oregon-postgres.render.com",
-                f"{parsed.hostname}.singapore-postgres.render.com",
-                f"{parsed.hostname}.frankfurt-postgres.render.com",
-                f"{parsed.hostname}.ohio-postgres.render.com",
-                f"{parsed.hostname}.virginia-postgres.render.com",
-            ]
-            for candidate in candidates:
-                try:
-                    socket.gethostbyname(candidate)
-                    netloc = parsed.netloc.replace(parsed.hostname, candidate)
-                    url = parsed._replace(netloc=netloc).geturl()
-                    break
-                except Exception:
-                    continue
+        if parsed.hostname and "." not in parsed.hostname and parsed.hostname.startswith("dpg-"):
+            region = os.getenv("RENDER_REGION", "oregon")
+            target_host = f"{parsed.hostname}.{region}-postgres.render.com"
+            netloc = parsed.netloc.replace(parsed.hostname, target_host)
+            url = parsed._replace(netloc=netloc).geturl()
     except Exception:
         pass
     return url
