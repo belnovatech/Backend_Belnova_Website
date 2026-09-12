@@ -149,6 +149,7 @@ async def contact_requirement(
 
     # 4. Dispatch email notifications asynchronously in the background
     email_payload = {
+        "submission_id": db_submission.id,
         "full_name": db_submission.full_name,
         "company_name": db_submission.company_name,
         "work_email": db_submission.work_email,
@@ -165,7 +166,7 @@ async def contact_requirement(
 
     if background_tasks is not None:
         logger.info(
-            "[EMAIL] Enqueued background email task for submission #%s (title: %s, email: %s)",
+            "[EMAIL] submission_id=%s (title: %s, email: %s)",
             db_submission.id, db_submission.project_title, db_submission.work_email
         )
         background_tasks.add_task(

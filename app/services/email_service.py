@@ -366,12 +366,14 @@ def _send_contact_requirement_emails_impl(data: dict, file_data: bytes = None, f
     import concurrent.futures
 
     t_task_start = time.perf_counter()
-    logger.info(
-        "[EMAIL] task_started (submission_title=%s, customer_email=%s)",
-        data.get("project_title"), data.get("work_email")
-    )
-
+    sub_id = data.get("submission_id", "unknown")
     ADMIN_EMAIL = "info@belnovatech.com"
+    customer_email = str(data.get('work_email') or "").strip()
+    customer_name = str(data.get('full_name') or "Customer").strip()
+
+    logger.info("[EMAIL] submission_id=%s", sub_id)
+    logger.info("[EMAIL] admin_recipient=%s", ADMIN_EMAIL)
+    logger.info("[EMAIL] customer_recipient=%s", customer_email)
 
     # 4. Prepare Admin Notification Payload (Always sent to internal admin)
     admin_payload = {
@@ -398,9 +400,6 @@ def _send_contact_requirement_emails_impl(data: dict, file_data: bytes = None, f
             )
 
     # 5. Prepare Customer Auto-Reply Payload (Sent ONLY to dynamic submitted work_email)
-    customer_email = str(data.get('work_email') or "").strip()
-    customer_name = str(data.get('full_name') or "Customer").strip()
-
     if not customer_email:
         logger.error("[EMAIL] Missing customer work_email in payload; customer auto-reply cannot be dispatched.")
         customer_payload = None
@@ -420,13 +419,13 @@ def _send_contact_requirement_emails_impl(data: dict, file_data: bytes = None, f
             res_admin = _send_brevo_email(admin_payload, "admin requirement notification")
             dur_ms = int((time.perf_counter() - t0) * 1000)
             logger.info(
-                "[EMAIL] admin_brevo_response (recipient=%s, status=%s, message_id=%s, elapsed_ms=%d)",
-                ADMIN_EMAIL, res_admin.get("status_code"), res_admin.get("message_id"), dur_ms
+                "[EMAIL] admin status=%s message_id=%s (elapsed_ms=%d)",
+                res_admin.get("status_code"), res_admin.get("message_id"), dur_ms
             )
             return res_admin
         except Exception as exc:
             dur_ms = int((time.perf_counter() - t0) * 1000)
-            logger.error("[EMAIL] admin_brevo_response FAILED (recipient=%s, elapsed_ms=%d): %s", ADMIN_EMAIL, dur_ms, exc)
+            logger.error("[EMAIL] admin FAILED status=error (recipient=%s, elapsed_ms=%d): %s", ADMIN_EMAIL, dur_ms, exc)
             return None
 
     def _dispatch_customer():
@@ -440,13 +439,13 @@ def _send_contact_requirement_emails_impl(data: dict, file_data: bytes = None, f
             res_cust = _send_brevo_email(customer_payload, "customer requirement auto-reply")
             dur_ms = int((time.perf_counter() - t0) * 1000)
             logger.info(
-                "[EMAIL] customer_brevo_response (recipient=%s, status=%s, message_id=%s, elapsed_ms=%d)",
-                customer_email, res_cust.get("status_code"), res_cust.get("message_id"), dur_ms
+                "[EMAIL] customer status=%s message_id=%s (elapsed_ms=%d)",
+                res_cust.get("status_code"), res_cust.get("message_id"), dur_ms
             )
             return res_cust
         except Exception as exc:
             dur_ms = int((time.perf_counter() - t0) * 1000)
-            logger.error("[EMAIL] customer_brevo_response FAILED (recipient=%s, elapsed_ms=%d): %s", customer_email, dur_ms, exc)
+            logger.error("[EMAIL] customer FAILED status=error (recipient=%s, elapsed_ms=%d): %s", customer_email, dur_ms, exc)
             return None
 
     with concurrent.futures.ThreadPoolExecutor(max_workers=2) as executor:
